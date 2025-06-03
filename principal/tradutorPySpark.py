@@ -1,7 +1,7 @@
 import re
 import sqlparse
-from sqlparse.sql import Identifier, Function, Parenthesis, IdentifierList
-from sqlparse.tokens import Keyword, DML, Wildcard, Punctuation
+from sqlparse.sql import Identifier, Function, Parenthesis, IdentifierList, Token, Where, Comparison
+from sqlparse.tokens import Keyword, DML, Wildcard, Punctuation, Name
 
 class ConverterPySpark:
     def __init__(self, query_sql):
@@ -58,6 +58,9 @@ class ConverterPySpark:
         elif isinstance(token, IdentifierList):
             return ', '.join(self.parsing_expressoes(t) for t in token.get_identifiers())
         
+        elif isinstance(token, Comparison):
+            return token.value
+            
         elif token.ttype is Wildcard:
             return "*"
         
@@ -70,69 +73,46 @@ class ConverterPySpark:
             'group_by': [], 'having': [], 'order_by': [], 'limit': None
         }
 
-        clausula_atual = None
-        faz_join = False
-
-        for token in self.parsed.tokens:
-            if token.is_whitespace or isinstance(token, sqlparse.sql.Comment):
-                continue
-
-            if token.ttype is DML and token.value.upper() == 'SELECT':
-                clausula_atual = 'select'
-
-            elif token.value.upper() == 'FROM':
-                clausula_atual = 'from'
-                faz_join = False
-
-            elif token.value.upper() == 'WHERE':
-                clausula_atual = 'where'
-                faz_join = False
-            
-            elif token.value.upper() == 'GROUP BY':
-                clausula_atual = 'group_by'
-                faz_join = False
-            
-            elif token.value.upper() == 'HAVING':
-                clausula_atual = 'having'
-                faz_join = False
-
-            elif token.value.upper() == 'ORDER BY':
-                clausula_atual = 'order_by'
-                faz_join = False
-
-            elif token.value.upper() == 'LIMIT':
-                clausula_atual = 'limit'
-                faz_join = False
-
-            elif token.value.upper().startswith('JOIN'):
-                clausula_atual = 'join'
-                faz_join = True
-
-            if clausula_atual:
-                if clausula_atual == 'limit' and token.ttype not in (Keyword, Punctuation):
-                    clausulas['limit'] = token.value
-
-                elif faz_join or clausula_atual in ['join', 'from']:
-                    clausulas[clausula_atual].append(token)
-
-                elif clausula_atual != 'limit':
-                    clausulas[clausula_atual].append(token)
+        # Abordagem mais simples: analisar a string SQL diretamente
+        sql_text = self.query_sql
+        
+        # Extrair SELECT
+        select_match = re.search(r'SELECT\s+(.*?)(?:\s+FROM\s+|\s*$)', sql_text, re.IGNORECASE | re.DOTALL)
+        if select_match:
+            select_clause = select_match.group(1).strip()
+            for item in select_clause.split(','):
+                clausulas['select'].append(item.strip())
+        
+        # Extrair FROM
+        from_match = re.search(r'FROM\s+(.*?)(?:\s+WHERE\s+|\s+GROUP\s+BY\s+|\s+HAVING\s+|\s+ORDER\s+BY\s+|\s+LIMIT\s+|\s*$)', sql_text, re.IGNORECASE | re.DOTALL)
+        if from_match:
+            from_clause = from_match.group(1).strip()
+            clausulas['from'].append(from_clause)
+        
+        # Extrair WHERE
+        where_match = re.search(r'WHERE\s+(.*?)(?:\s+GROUP\s+BY\s+|\s+HAVING\s+|\s+ORDER\s+BY\s+|\s+LIMIT\s+|\s*$)', sql_text, re.IGNORECASE | re.DOTALL)
+        if where_match:
+            where_clause = where_match.group(1).strip()
+            clausulas['where'].append(where_clause)
+        
+        # Extrair ORDER BY
+        order_match = re.search(r'ORDER\s+BY\s+(.*?)(?:\s+LIMIT\s+|\s*$)', sql_text, re.IGNORECASE | re.DOTALL)
+        if order_match:
+            order_clause = order_match.group(1).strip()
+            # Remover ponto e vírgula final se existir
+            if order_clause.endswith(';'):
+                order_clause = order_clause[:-1].strip()
+            clausulas['order_by'].append(order_clause)
         
         return clausulas
 
     def parsing_FROM(self, tokens):
         "Função que analisa e faz o parsing do FROM"
-
         if not tokens:
             return None
         
-        if isinstance(tokens[0], Parenthesis):
-            conteudo = tokens[0].value[1:-1].strip()
-            if conteudo.upper().startswith('SELECT'):
-                alias = self.gerador_alias()
-                self.subqueries[alias] = ConverterPySpark(conteudo)
-                return alias
-        return self.parsing_expressoes(tokens[0])
+        # Extrair o nome da tabela do token
+        return tokens[0]
     
     def parsing_JOIN(self, tokens):
         "Função que analisa e faz o parsing do JOIN"
@@ -140,7 +120,7 @@ class ConverterPySpark:
         JOIN_atual = {'type': 'inner', 'table': None, 'condition': None}
 
         for token in tokens:
-            valor_token_maiusculo = token.value.upper()
+            valor_token_maiusculo = token.upper() if isinstance(token, str) else token.value.upper()
 
             if valor_token_maiusculo.startswith('LEFT'):
                 JOIN_atual['type'] = 'left'
@@ -167,17 +147,7 @@ class ConverterPySpark:
     
     def parsing_SELECT(self, tokens):
         "Função que analisa e faz o parsing do SELECT"
-        expressoes = []
-        for token in tokens:
-            if isinstance(token, IdentifierList):
-                for subtoken in token.get_identifiers():
-                    expr = self.parsing_expressoes(subtoken)
-                    expressoes.append(expr)
-            else: 
-                expr = self.parsing_expressoes(token)
-                expressoes.append(expr)
-
-        return expressoes
+        return tokens
     
     def construtor(self, clausulas):
         "Função que constrói a query SQL, no formato PySpark desejado"
@@ -187,27 +157,26 @@ class ConverterPySpark:
         if not clausula_from:
             return "# Erro: Não foi possível identificar a tabela FROM"
             
-        nome_tabela = clausula_from.split()[-1] if ' ' in clausula_from else clausula_from
+        nome_tabela = clausula_from
         nome_df = f"{nome_tabela.lower()}_df"
 
         # Inicia a cadeia de métodos
-        cadeia = f"{nome_df} = spark.table(\"{nome_tabela}\")"
-
-        # Resgata os JOINS
-        for join in self.parsing_JOIN(clausulas['join']):
-            tabela = join['table'].split()[-1] if ' ' in join['table'] else join['table']
-            tipo_JOIN = join['type']
-            condicao = join['condition']
-            cadeia += f".join({tabela.lower()}_df, \"{condicao}\", \"{tipo_JOIN}\")"
+        cadeia = f"{nome_df}"
 
         # Resgata WHERE
         if clausulas['where']:
-            expressao_where = ' AND '.join(self.parsing_expressoes(t) for t in clausulas['where'])
-            cadeia += f".filter(\"{expressao_where}\")"
+            where_text = clausulas['where'][0]
+            cadeia += f".filter(\"{where_text}\")"
+
+        # SELECT simples
+        if clausulas['select']:
+            expressoes_select = self.parsing_SELECT(clausulas['select'])
+            string_select = ', '.join([f'\"{expr.split(" AS ")[0].strip()}\"' for expr in expressoes_select])
+            cadeia += f".select({string_select})"   
 
         # Resgata GROUP BY com funções de agregação
         if clausulas['group_by']:
-            group_by_colunas = [self.parsing_expressoes(t) for t in clausulas['group_by']]
+            group_by_colunas = clausulas['group_by']
             string_group_by = ', '.join([f'\"{coluna}\"' for coluna in group_by_colunas])
             cadeia += f".groupBy({string_group_by})"
 
@@ -217,30 +186,32 @@ class ConverterPySpark:
                 string_agregacao = ', '.join([f'F.expr(\"{expr}\")' for expr in expressoes_agregacao])
                 cadeia += f".agg({string_agregacao})"
 
-        # SELECT simples
-        if not clausulas['group_by'] and clausulas['select']:
-            expressoes_select = self.parsing_SELECT(clausulas['select'])
-            string_select = ', '.join([f'\"{expr.split(" AS ")[0].strip()}\"' for expr in expressoes_select])
-            cadeia += f".select({string_select})"   
-
         # Resgata HAVING
         if clausulas['having']:
-            expressao_having = ' AND '.join(self.parsing_expressoes(t) for t in clausulas['having'])
+            expressao_having = clausulas['having'][0]
             cadeia += f".filter(\"{expressao_having}\")"
 
         # Resgata ORDER BY
         if clausulas['order_by']:
-            expressao_order_by = ', '.join(self.parsing_expressoes(t) for t in clausulas['order_by'])
-            if 'DESC' in expressao_order_by.upper():
-                coluna = re.sub(r'\s+DESC', '', expressao_order_by, flags=re.IGNORECASE).strip()
+            order_text = clausulas['order_by'][0]
+            
+            if 'DESC' in order_text.upper():
+                coluna = re.sub(r'\s+DESC', '', order_text, flags=re.IGNORECASE).strip()
                 cadeia += f".orderBy(\"{coluna}\", ascending=False)"
             else:
-                coluna = re.sub(r'\s+ASC', '', expressao_order_by, flags=re.IGNORECASE).strip()
+                coluna = re.sub(r'\s+ASC', '', order_text, flags=re.IGNORECASE).strip()
                 cadeia += f".orderBy(\"{coluna}\")"
 
         # Resgata LIMIT
         if clausulas['limit']:
             cadeia += f".limit({clausulas['limit']})"
+
+        # Resgata os JOINS
+        for join in self.parsing_JOIN(clausulas['join']):
+            tabela = join['table'].split()[-1] if ' ' in join['table'] else join['table']
+            tipo_JOIN = join['type']
+            condicao = join['condition']
+            cadeia += f".join({tabela.lower()}_df, \"{condicao}\", \"{tipo_JOIN}\")"
 
         return cadeia
     

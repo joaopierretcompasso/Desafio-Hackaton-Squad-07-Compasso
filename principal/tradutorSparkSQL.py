@@ -55,40 +55,25 @@ class ConverterSparkSQL:
             return token.value
         
         return token.value
-
-    def substituir_trunc(self, query):
-        pattern = r'TRUNC\s*\(\s*([^,]+)\s*(?:,\s*([^)]+)\s*)?\)'
-        
-        def repl(m):
-            param1 = m.group(1).strip()
-            param2 = m.group(2)
-            if param2:
-                param2 = param2.strip()
-                return f"DATE_TRUNC({param2}, {param1})"
-            else:
-                return f"DATE_TRUNC('DAY', {param1})"
-        
-        return re.sub(pattern, repl, query, flags=re.IGNORECASE)
     
     def tradutor(self):
         "Função que traduz para string executável spark.sql"
 
+        # Pesquisei algumas funções que não são compatíveis e então, são substituídas
+        # Obviamente, são substituídas por funções que são compatíveis
         substituicoes = {
             r'\bNVL\b': 'COALESCE',
             r'\bSYSDATE\b': 'CURRENT_DATE()',
             r'\bTO_DATE\b': 'TO_DATE',
             r'\bDECODE\b': 'CASE',
             r'\bROWNUM\b': 'ROW_NUMBER() OVER (ORDER BY (SELECT_NULL))',
-
+            r'\bTRUNC\b': 'DATE_TRUNC'
         }
 
         resultado = self.query_sql
         
         for padrao, substituicao in substituicoes.items():
             resultado = re.sub(padrao, substituicao, resultado, flags=re.IGNORECASE)
-
-        # Substituição especial para TRUNC
-        resultado = self.substituir_trunc(resultado)
 
         # Faz o processamento das CTEs
         if self.ctes:
