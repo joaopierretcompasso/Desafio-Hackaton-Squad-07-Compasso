@@ -1,2 +1,3 @@
 principal/venv
 principal/__pycache__
+tests/__pycache__
