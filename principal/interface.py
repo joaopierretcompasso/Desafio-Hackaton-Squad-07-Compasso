@@ -1,75 +1,58 @@
-import tkinter as tk
-from tkinter import scrolledtext
+from flask import Flask, request, jsonify, render_template
 from main import processar_query
+import os
+import re
 
-class SQLConverterApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Conversor SQL para SparkSQL e PySpark")
-        self.root.geometry("800x600")
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/convert', methods=['POST'])
+def convert():
+    try:
+        if 'file' in request.files:
+            file = request.files['file']
+            if file.filename:
+                sql_query = file.read().decode('utf-8')
+            else:
+                sql_query = request.form.get('sql_text', '')
+        else:
+            sql_query = request.form.get('sql_text', '')
         
-        # Frame para entrada SQL
-        input_frame = tk.Frame(root)
-        input_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        if not sql_query:
+            return jsonify({'error': 'Nenhuma consulta SQL fornecida'}), 400
         
-        tk.Label(input_frame, text="Digite sua query SQL:").pack(anchor=tk.W)
+        if not re.search(r'^\s*SELECT\s+', sql_query, re.IGNORECASE):
+            return jsonify({
+                'error': 'A consulta SQL deve começar com SELECT',
+                'original_query': sql_query
+            }), 400
         
-        self.sql_input = scrolledtext.ScrolledText(input_frame, height=10)
-        self.sql_input.pack(fill=tk.BOTH, expand=True)
+        spark_sql, pyspark = processar_query(sql_query)
         
-        # Botão para processar
-        process_button = tk.Button(root, text="Converter", command=self.converter_sql)
-        process_button.pack(pady=10)
+        if pyspark.startswith("# Erro:"):
+            return jsonify({
+                'error': pyspark.replace("# Erro: ", ""),
+                'spark_sql': spark_sql,
+                'pyspark': pyspark,
+                'original_query': sql_query
+            }), 400
         
-        # Frame para saídas
-        output_frame = tk.Frame(root)
-        output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Frame para SparkSQL
-        spark_sql_frame = tk.Frame(output_frame)
-        spark_sql_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=(0, 5))
-        
-        tk.Label(spark_sql_frame, text="SparkSQL:").pack(anchor=tk.W)
-        self.spark_sql_output = scrolledtext.ScrolledText(spark_sql_frame)
-        self.spark_sql_output.pack(fill=tk.BOTH, expand=True)
-        
-        # Frame para PySpark
-        pyspark_frame = tk.Frame(output_frame)
-        pyspark_frame.pack(fill=tk.BOTH, expand=True, side=tk.RIGHT, padx=(5, 0))
-        
-        tk.Label(pyspark_frame, text="PySpark:").pack(anchor=tk.W)
-        self.pyspark_output = scrolledtext.ScrolledText(pyspark_frame)
-        self.pyspark_output.pack(fill=tk.BOTH, expand=True)
+        return jsonify({
+            'spark_sql': spark_sql,
+            'pyspark': pyspark,
+            'original_query': sql_query
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    if not os.path.exists('templates'):
+        os.makedirs('templates')
     
-    def converter_sql(self):
-        # Limpar saídas anteriores
-        self.spark_sql_output.delete(1.0, tk.END)
-        self.pyspark_output.delete(1.0, tk.END)
+    if not os.path.exists('static'):
+        os.makedirs('static')
         
-        # Obter a query SQL da entrada
-        query_sql = self.sql_input.get(1.0, tk.END).strip()
-        
-        if not query_sql:
-            self.spark_sql_output.insert(tk.END, "Por favor, insira uma query SQL.")
-            self.pyspark_output.insert(tk.END, "Por favor, insira uma query SQL.")
-            return
-        
-        try:
-            # Processar a query usando a função existente
-            spark_sql, pyspark = processar_query(query_sql)
-            
-            # Exibir resultados
-            self.spark_sql_output.insert(tk.END, spark_sql)
-            self.pyspark_output.insert(tk.END, pyspark)
-        except Exception as e:
-            error_msg = f"Erro ao processar a query: {str(e)}"
-            self.spark_sql_output.insert(tk.END, error_msg)
-            self.pyspark_output.insert(tk.END, error_msg)
-
-def main():
-    root = tk.Tk()
-    app = SQLConverterApp(root)
-    root.mainloop()
-
-if __name__ == "__main__":
-    main()
+    app.run(debug=True)

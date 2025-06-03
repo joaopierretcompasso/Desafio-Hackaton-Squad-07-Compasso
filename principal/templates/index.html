@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+	<head>
+		<meta charset="UTF-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1.0"
+		/>
+		<title>SparkMigrator</title>
+
+		<link
+			rel="stylesheet"
+			href="{{ url_for('static', filename='css/style.css') }}"
+		/>
+		<link
+			rel="stylesheet"
+			href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css"
+		/>
+	</head>
+	<body>
+		<div class="container">
+			<header>
+				<h1>SparkMigrator</h1>
+			</header>
+
+			<div class="input-section">
+				<div class="input-header">
+					<h2>SQL Query</h2>
+					<div class="buttons">
+						<button
+							id="load-file-btn"
+							class="btn"
+						>
+							Carregar Arquivo SQL
+						</button>
+						<button id="clear-btn" class="btn">
+							Limpar
+						</button>
+						<button
+							id="convert-btn"
+							class="btn primary"
+						>
+							Converter
+						</button>
+					</div>
+				</div>
+				<div class="input-area">
+					<textarea
+						id="sql-input"
+						placeholder="Digite sua consulta SQL aqui ou carregue um arquivo..."
+					></textarea>
+					<input
+						type="file"
+						id="file-input"
+						accept=".sql,.txt"
+						style="display: none"
+					/>
+				</div>
+			</div>
+
+			<div class="results-section">
+				<div class="result-container">
+					<h2>SparkSQL</h2>
+					<pre><code class="language-python" id="spark-sql-output"></code></pre>
+				</div>
+				<div class="result-container">
+					<h2>PySpark</h2>
+					<pre><code class="language-python" id="pyspark-output"></code></pre>
+				</div>
+			</div>
+
+			<div id="status-bar">Pronto</div>
+		</div>
+
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+		<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+	</body>
+</html>
